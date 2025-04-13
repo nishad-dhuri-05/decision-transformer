@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 import wandb
@@ -36,17 +36,17 @@ def experiment(
     exp_prefix = f'{group_name}-{random.randint(int(1e5), int(1e6) - 1)}'
 
     if env_name == 'hopper':
-        env = gym.make('Hopper-v3')
+        env = gym.make('Hopper-v4')
         max_ep_len = 1000
         env_targets = [3600, 1800]  # evaluation conditioning targets
         scale = 1000.  # normalization for rewards/returns
     elif env_name == 'halfcheetah':
-        env = gym.make('HalfCheetah-v3')
+        env = gym.make('HalfCheetah-v4')
         max_ep_len = 1000
         env_targets = [12000, 6000]
         scale = 1000.
     elif env_name == 'walker2d':
-        env = gym.make('Walker2d-v3')
+        env = gym.make('Walker2d-v4')
         max_ep_len = 1000
         env_targets = [5000, 2500]
         scale = 1000.
@@ -66,7 +66,7 @@ def experiment(
     act_dim = env.action_space.shape[0]
 
     # load dataset
-    dataset_path = f'data/{env_name}-{dataset}-v2.pkl'
+    dataset_path = f'data/{env_name}-{dataset}-v0.pkl'
     with open(dataset_path, 'rb') as f:
         trajectories = pickle.load(f)
 

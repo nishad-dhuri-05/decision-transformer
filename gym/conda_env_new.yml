@@ -1,0 +1,16 @@
+name: decision-transformer-gym
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - numpy
+  - pytorch
+  - cudatoolkit=11.8  # adjust based on your GPU or use 'cpuonly'
+  - pip:
+      - gym==0.26.2
+      - mujoco==2.3.7
+      - torch==2.0.1
+      - transformers==4.38.2
+      - wandb==0.16.3
