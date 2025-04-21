@@ -33,6 +33,7 @@ class DecisionTransformer(TrajectoryModel):
             **kwargs
         )
         config.n_ctx=config.n_positions
+        config.latent_dim = 96
         # note: the only difference between this GPT2Model and the default Huggingface version
         # is that the positional embeddings are removed (since we'll add those ourselves)
         self.transformer = GPT2Model(config)

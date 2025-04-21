@@ -27,7 +27,9 @@ from torch.utils.data.dataloader import DataLoader
 logger = logging.getLogger(__name__)
 
 from mingpt.utils import sample
-import atari_py
+# import atari_py
+import ale_py
+from ale_py import ALEInterface
 from collections import deque
 import random
 import cv2
@@ -225,13 +227,22 @@ class Trainer:
 class Env():
     def __init__(self, args):
         self.device = args.device
-        self.ale = atari_py.ALEInterface()
+        # self.ale = atari_py.ALEInterface()
+        self.ale=ALEInterface()
         self.ale.setInt('random_seed', args.seed)
         self.ale.setInt('max_num_frames_per_episode', args.max_episode_length)
         self.ale.setFloat('repeat_action_probability', 0)  # Disable sticky actions
         self.ale.setInt('frame_skip', 0)
         self.ale.setBool('color_averaging', False)
-        self.ale.loadROM(atari_py.get_game_path(args.game))  # ROM loading must be done after setting options
+        if args.game == 'Pong':
+            self.ale.loadROM(ale_py.roms.Pong)
+        elif args.game == 'Breakout':
+            self.ale.loadROM(ale_py.roms.Breakout)
+        elif args.game == 'Seaquest':
+            self.ale.loadROM(ale_py.roms.Seaquest)
+        elif args.game == 'Qbert':
+            self.ale.loadROM(ale_py.roms.Qbert)
+        # self.ale.loadROM(atari_py.get_game_path(args.game))  # ROM loading must be done after setting options
         actions = self.ale.getMinimalActionSet()
         self.actions = dict([i, e] for i, e in zip(range(len(actions)), actions))
         self.lives = 0  # Life counter (used in DeepMind training)
