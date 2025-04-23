@@ -190,7 +190,7 @@ class Attention(nn.Module):
         head_mask=None,
         encoder_hidden_states=None,
         encoder_attention_mask=None,
-        use_cache=False,
+        use_cache=True,
         output_attentions=False,
     ):
         # Compute latent query, key, and value
@@ -270,7 +270,7 @@ class Block(nn.Module):
             head_mask=None,
             encoder_hidden_states=None,
             encoder_attention_mask=None,
-            use_cache=False,
+            use_cache=True,
             output_attentions=False,
     ):
         attn_outputs = self.attn(
