@@ -33,7 +33,7 @@ class DecisionTransformer(TrajectoryModel):
             **kwargs
         )
         config.n_ctx=config.n_positions
-        config.latent_dim = 64
+        config.latent_dim = 128
         config.use_cache=True
         print(config.add_cross_attention)
         # note: the only difference between this GPT2Model and the default Huggingface version
@@ -53,7 +53,8 @@ class DecisionTransformer(TrajectoryModel):
             *([nn.Linear(hidden_size, self.act_dim)] + ([nn.Tanh()] if action_tanh else []))
         )
         self.predict_return = torch.nn.Linear(hidden_size, 1)
-
+    def set_eval(self):
+        self.transformer.set_eval()
     def forward(self, states, actions, rewards, returns_to_go, timesteps, attention_mask=None):
 
         batch_size, seq_length = states.shape[0], states.shape[1]

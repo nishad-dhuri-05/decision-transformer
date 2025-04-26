@@ -79,6 +79,7 @@ def evaluate_episode_rtg(
     ):
 
     model.eval()
+    model.set_eval()
     model.to(device=device)
 
     state_mean = torch.from_numpy(state_mean).to(device=device)
