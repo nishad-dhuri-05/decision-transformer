@@ -117,659 +117,6 @@ def load_tf_weights_in_gpt2(model, config, gpt2_checkpoint_path):
         pointer.data = torch.from_numpy(array)
     return model
 
-# #Old one
-# class Attention(nn.Module):
-#     def __init__(self, nx, n_ctx, config, scale=False, is_cross_attention=False):
-#         super().__init__()
-
-#         n_state = nx  # in Attention: n_state=768 (nx=n_embd)
-#         # [switch nx => n_state from Block to Attention to keep identical to TF implem]
-#         assert n_state % config.n_head == 0
-#         self.register_buffer(
-#             "bias", torch.tril(torch.ones((n_ctx, n_ctx), dtype=torch.uint8)).view(1, 1, n_ctx, n_ctx)
-#         )
-#         self.register_buffer("masked_bias", torch.tensor(-1e4))
-#         self.n_head = config.n_head
-#         self.split_size = n_state
-#         self.scale = scale
-#         self.is_cross_attention = is_cross_attention
-#         if self.is_cross_attention:
-#             self.c_attn = Conv1D(2 * n_state, nx)
-#             self.q_attn = Conv1D(n_state, nx)
-#         else:
-#             self.c_attn = Conv1D(3 * n_state, nx)
-#         self.c_proj = Conv1D(n_state, nx)
-#         self.attn_dropout = nn.Dropout(config.attn_pdrop)
-#         self.resid_dropout = nn.Dropout(config.resid_pdrop)
-#         self.pruned_heads = set()
-
-#     def prune_heads(self, heads):
-#         if len(heads) == 0:
-#             return
-#         heads, index = find_pruneable_heads_and_indices(
-#             heads, self.n_head, self.split_size // self.n_head, self.pruned_heads
-#         )
-#         index_attn = torch.cat([index, index + self.split_size, index + (2 * self.split_size)])
-
-#         # Prune conv1d layers
-#         self.c_attn = prune_conv1d_layer(self.c_attn, index_attn, dim=1)
-#         self.c_proj = prune_conv1d_layer(self.c_proj, index, dim=0)
-
-#         # Update hyper params
-#         self.split_size = (self.split_size // self.n_head) * (self.n_head - len(heads))
-#         self.n_head = self.n_head - len(heads)
-#         self.pruned_heads = self.pruned_heads.union(heads)
-
-#     def _attn(self, q, k, v, attention_mask=None, head_mask=None, output_attentions=False):
-#         w = torch.matmul(q, k)
-#         if self.scale:
-#             w = w / (float(v.size(-1)) ** 0.5)
-#         nd, ns = w.size(-2), w.size(-1)
-
-#         if not self.is_cross_attention:
-#             # if only "normal" attention layer implements causal mask
-#             mask = self.bias[:, :, ns - nd: ns, :ns]
-#             w = torch.where(mask.bool(), w, self.masked_bias.to(w.dtype))
-
-#         if attention_mask is not None:
-#             # Apply the attention mask
-#             w = w + attention_mask
-
-#         w = nn.Softmax(dim=-1)(w)
-#         w = self.attn_dropout(w)
-
-#         # Mask heads if we want to
-#         if head_mask is not None:
-#             w = w * head_mask
-
-#         outputs = [torch.matmul(w, v)]
-#         if output_attentions:
-#             outputs.append(w)
-#         return outputs
-
-#     def merge_heads(self, x):
-#         x = x.permute(0, 2, 1, 3).contiguous()
-#         new_x_shape = x.size()[:-2] + (x.size(-2) * x.size(-1),)
-#         return x.view(*new_x_shape)  # in Tensorflow implem: fct merge_states
-
-#     def split_heads(self, x, k=False):
-#         new_x_shape = x.size()[:-1] + (self.n_head, x.size(-1) // self.n_head)
-#         x = x.view(*new_x_shape)  # in Tensorflow implem: fct split_states
-#         if k:
-#             return x.permute(0, 2, 3, 1)  # (batch, head, head_features, seq_length)
-#         else:
-#             return x.permute(0, 2, 1, 3)  # (batch, head, seq_length, head_features)
-
-#     def forward(
-#             self,
-#             hidden_states,
-#             layer_past=None,
-#             attention_mask=None,
-#             head_mask=None,
-#             encoder_hidden_states=None,
-#             encoder_attention_mask=None,
-#             use_cache=False,
-#             output_attentions=False,
-#     ):
-#         if encoder_hidden_states is not None:
-#             assert hasattr(
-#                 self, "q_attn"
-#             ), "If class is used as cross attention, the weights `q_attn` have to be defined. Please make sure to instantiate class with `Attention(..., is_cross_attention=True)`."
-#             query = self.q_attn(hidden_states)
-#             key, value = self.c_attn(encoder_hidden_states).split(self.split_size, dim=2)
-#             attention_mask = encoder_attention_mask
-#         else:
-#             query, key, value = self.c_attn(hidden_states).split(self.split_size, dim=2)
-
-#         query = self.split_heads(query)
-#         key = self.split_heads(key, k=True)
-#         value = self.split_heads(value)
-#         if layer_past is not None:
-#             past_key, past_value = layer_past[0].transpose(-2, -1), layer_past[1]  # transpose back cf below
-#             key = torch.cat((past_key, key), dim=-1)
-#             value = torch.cat((past_value, value), dim=-2)
-
-#         if use_cache is True:
-#             present = torch.stack((key.transpose(-2, -1), value))  # transpose to have same shapes for stacking
-#         else:
-#             present = (None,)
-
-#         attn_outputs = self._attn(query, key, value, attention_mask, head_mask, output_attentions)
-#         a = attn_outputs[0]
-
-#         a = self.merge_heads(a)
-#         a = self.c_proj(a)
-#         a = self.resid_dropout(a)
-
-#         outputs = [a, present] + attn_outputs[1:]
-#         return outputs  # a, present, (attentions)
-
-
-# class Attention(nn.Module):
-#     def __init__(self, nx, n_ctx, config, scale=False, is_cross_attention=False):
-#         super().__init__()
-#         # nx is the model (hidden) size, e.g. 128 or 768.
-#         # We work in a latent space of size config.latent_dim.
-#         self.n_head = config.n_head
-#         if not hasattr(config, "latent_dim"):
-#             raise ValueError("config.latent_dim must be defined for latent attention.")
-#         self.latent_dim = config.latent_dim
-#         if self.latent_dim % self.n_head != 0:
-#             raise ValueError(f"config.latent_dim ({self.latent_dim}) must be divisible by n_head ({self.n_head}).")
-#         self.head_dim = self.latent_dim // self.n_head
-
-#         # Causal mask (only used for self-attention)
-#         self.register_buffer("bias", torch.tril(torch.ones((n_ctx, n_ctx), dtype=torch.uint8)).view(1, 1, n_ctx, n_ctx))
-#         self.register_buffer("masked_bias", torch.tensor(-1e4))
-
-#         self.scale = scale
-#         self.is_cross_attention = is_cross_attention
-
-#         # Use separate projection layers for Q, K, V to latent space.
-#         if self.is_cross_attention:
-#             # For cross attention, use separate Q projection from the current states.
-#             self.q_proj = nn.Linear(nx, self.latent_dim)
-#             self.k_proj = nn.Linear(nx, self.latent_dim)
-#             self.v_proj = nn.Linear(nx, self.latent_dim)
-#         else:
-#             self.q_proj = nn.Linear(nx, self.latent_dim)
-#             self.k_proj = nn.Linear(nx, self.latent_dim)
-#             self.v_proj = nn.Linear(nx, self.latent_dim)
-
-#         # Output projection: project from latent_dim back to the model dimension (nx).
-#         self.out_proj = nn.Linear(self.latent_dim, nx)
-
-#         self.attn_dropout = nn.Dropout(config.attn_pdrop)
-#         self.resid_dropout = nn.Dropout(config.resid_pdrop)
-#         self.pruned_heads = set()
-
-#     def split_heads(self, x, transpose_result=True):
-#         # Input x: [batch, seqlen, latent_dim]
-#         new_shape = x.size()[:-1] + (self.n_head, self.head_dim)
-#         x = x.view(*new_shape)  # [batch, seqlen, n_head, head_dim]
-#         if transpose_result:
-#             x = x.permute(0, 2, 1, 3)  # [batch, n_head, seqlen, head_dim]
-#         return x
-
-#     def merge_heads(self, x):
-#         # x: [batch, n_head, seqlen, head_dim]
-#         x = x.permute(0, 2, 1, 3).contiguous()  # [batch, seqlen, n_head, head_dim]
-#         new_shape = x.size()[:-2] + (self.n_head * self.head_dim,)
-#         return x.view(*new_shape)  # [batch, seqlen, latent_dim]
-
-#     def _latent_attention(self, q, k, v, attention_mask=None, head_mask=None, output_attentions=False):
-#         # q, k, v: [batch, n_head, seqlen, head_dim]
-#         # Compute raw attention score.
-#         w = torch.matmul(q, k.transpose(-1, -2))  # [batch, n_head, seqlen, seqlen]
-#         if self.scale:
-#             w = w / math.sqrt(self.head_dim)
-#         # Apply causal mask for self-attention.
-#         if not self.is_cross_attention:
-#             nd, ns = w.size(-2), w.size(-1)
-#             mask = self.bias[:, :, ns - nd:ns, :ns]
-#             w = torch.where(mask.bool(), w, self.masked_bias.to(w.dtype))
-#         if attention_mask is not None:
-#             w = w + attention_mask
-#         w = nn.Softmax(dim=-1)(w)
-#         w = self.attn_dropout(w)
-#         if head_mask is not None:
-#             w = w * head_mask
-#         attn_output = torch.matmul(w, v)  # [batch, n_head, seqlen, head_dim]
-#         if output_attentions:
-#             return [attn_output, w]
-#         return [attn_output]
-
-#     def forward(
-#             self,
-#             hidden_states,
-#             layer_past=None,
-#             attention_mask=None,
-#             head_mask=None,
-#             encoder_hidden_states=None,
-#             encoder_attention_mask=None,
-#             use_cache=True,
-#             output_attentions=False,
-#     ):
-#         # Project inputs to latent space.
-#         if encoder_hidden_states is not None:
-#             query = self.q_proj(hidden_states)
-#             key = self.k_proj(encoder_hidden_states)
-#             value = self.v_proj(encoder_hidden_states)
-#             attention_mask = encoder_attention_mask
-#         else:
-#             query = self.q_proj(hidden_states)
-#             key = self.k_proj(hidden_states)
-#             value = self.v_proj(hidden_states)
-
-#         # Split projections into heads.
-#         q = self.split_heads(query)     # [B, n_head, T, head_dim]
-#         k = self.split_heads(key)         # [B, n_head, T, head_dim]
-#         v = self.split_heads(value)       # [B, n_head, T, head_dim]
-
-#         # (Optional) If using cached past key/values, handle here.
-#         if layer_past is not None:
-#             past_key, past_value = layer_past[0].transpose(-2, -1), layer_past[1]
-#             k = torch.cat((past_key, k), dim=-1)
-#             v = torch.cat((past_value, v), dim=-2)
-
-#         # Instead of stacking with transpose (which swaps dimensions), return the tuple.
-#         if use_cache:
-#             # print("Using cached k v")
-#             present = (k, v)
-#         else:
-#             present = (None,)
-
-#         # Compute latent attention.
-#         attn_outputs = self._latent_attention(q, k, v, attention_mask, head_mask, output_attentions)
-#         a = attn_outputs[0]  # [B, n_head, T, head_dim]
-
-#         # Merge heads and project back to model dimension.
-#         a = self.merge_heads(a)         # [B, T, latent_dim]
-#         a = self.out_proj(a)            # [B, T, nx]
-#         a = self.resid_dropout(a)
-#         outputs = [a, present] + attn_outputs[1:]
-#         return outputs  # a, present, (attentions, if requested)
-
-
-# class Attention(nn.Module):
-#     def __init__(self, nx, n_ctx, config, scale=False, is_cross_attention=False):
-#         super().__init__()
-#         # nx is the model (hidden) size, e.g. 128 or 768
-#         self.n_head = config.n_head
-        
-#         # Latent dimension handling
-#         if not hasattr(config, "latent_dim"):
-#             self.latent_dim = nx  # Default to original size if not specified
-#         else:
-#             self.latent_dim = config.latent_dim
-            
-#         if self.latent_dim % self.n_head != 0:
-#             raise ValueError(f"latent_dim ({self.latent_dim}) must be divisible by n_head ({self.n_head})")
-        
-#         self.head_dim = self.latent_dim // self.n_head
-        
-#         # Register causal mask buffers
-#         self.register_buffer(
-#             "bias", torch.tril(torch.ones((n_ctx, n_ctx), dtype=torch.uint8)).view(1, 1, n_ctx, n_ctx)
-#         )
-#         self.register_buffer("masked_bias", torch.tensor(-1e4))
-        
-#         self.scale = scale
-#         self.is_cross_attention = is_cross_attention
-        
-#         # Single large matrix for all projections (more efficient)
-#         if self.is_cross_attention:
-#             # For cross-attention
-#             self.c_attn_q = Conv1D(self.latent_dim, nx)
-#             self.c_attn_kv = Conv1D(2 * self.latent_dim, nx)
-#         else:
-#             # For self-attention - single projection for Q, K, V
-#             self.c_attn = Conv1D(3 * self.latent_dim, nx)
-        
-#         # Output projection back to model dimension
-#         self.c_proj = Conv1D(nx, self.latent_dim)
-        
-#         self.attn_dropout = nn.Dropout(config.attn_pdrop)
-#         self.resid_dropout = nn.Dropout(config.resid_pdrop)
-#         self.pruned_heads = set()
-    
-#     def split_heads(self, x, k=False):
-#         """Split into attention heads"""
-#         new_x_shape = x.size()[:-1] + (self.n_head, self.head_dim)
-#         x = x.view(*new_x_shape)  # [batch, seq_len, n_head, head_dim]
-#         if k:
-#             return x.permute(0, 2, 3, 1)  # [batch, n_head, head_dim, seq_len]
-#         else:
-#             return x.permute(0, 2, 1, 3)  # [batch, n_head, seq_len, head_dim]
-    
-#     def merge_heads(self, x):
-#         """Merge attention heads"""
-#         x = x.permute(0, 2, 1, 3).contiguous()  # [batch, seq_len, n_head, head_dim]
-#         new_x_shape = x.size()[:-2] + (self.latent_dim,)
-#         return x.view(*new_x_shape)  # [batch, seq_len, latent_dim]
-    
-#     def _latent_attention(self, q, k, v, attention_mask=None, head_mask=None, output_attentions=False):
-#         # q, k, v: [batch, n_head, seq_len/head_dim, head_dim/seq_len]
-#         # Compute raw attention scores
-#         w = torch.matmul(q, k)  # [batch, n_head, seq_len, seq_len]
-        
-#         if self.scale:
-#             w = w / math.sqrt(self.head_dim)
-        
-#         # Apply causal mask for self-attention
-#         if not self.is_cross_attention:
-#             nd, ns = w.size(-2), w.size(-1)
-#             mask = self.bias[:, :, ns - nd:ns, :ns]
-#             w = torch.where(mask.bool(), w, self.masked_bias.to(w.dtype))
-        
-#         if attention_mask is not None:
-#             w = w + attention_mask
-        
-#         w = nn.Softmax(dim=-1)(w)
-#         w = self.attn_dropout(w)
-        
-#         if head_mask is not None:
-#             w = w * head_mask
-        
-#         outputs = [torch.matmul(w, v)]
-#         if output_attentions:
-#             outputs.append(w)
-#         return outputs
-    
-#     def forward(
-#             self,
-#             hidden_states,
-#             layer_past=None,
-#             attention_mask=None,
-#             head_mask=None,
-#             encoder_hidden_states=None,
-#             encoder_attention_mask=None,
-#             use_cache=False,
-#             output_attentions=False,
-#     ):
-#         # Project inputs to latent space with a single matrix multiplication
-#         if encoder_hidden_states is not None:
-#             # Cross-attention case
-#             query = self.c_attn_q(hidden_states)
-#             key_value = self.c_attn_kv(encoder_hidden_states)
-#             key, value = key_value.split(self.latent_dim, dim=2)
-#             attention_mask = encoder_attention_mask
-#         else:
-#             # Self-attention case - more efficient single projection
-#             qkv = self.c_attn(hidden_states)
-#             query, key, value = qkv.split(self.latent_dim, dim=2)
-        
-#         # Split heads
-#         query = self.split_heads(query)
-#         key = self.split_heads(key, k=True)
-#         value = self.split_heads(value)
-        
-#         # Handle cached past key/values for incremental decoding
-#         if layer_past is not None:
-#             past_key, past_value = layer_past[0].transpose(-2, -1), layer_past[1]
-#             key = torch.cat((past_key, key), dim=-1)
-#             value = torch.cat((past_value, value), dim=-2)
-        
-#         # Store current keys and values if using cache
-#         if use_cache:
-#             present = (key, value)
-#         else:
-#             present = (None,)
-        
-#         # Compute attention
-#         attn_outputs = self._latent_attention(query, key, value, attention_mask, head_mask, output_attentions)
-#         a = attn_outputs[0]
-        
-#         # Merge heads
-#         a = self.merge_heads(a)
-        
-#         # Project back to model dimension
-#         a = self.c_proj(a)
-#         a = self.resid_dropout(a)
-        
-#         outputs = [a, present] + attn_outputs[1:]
-#         return outputs  # a, present, (attentions)
-
-
-# class Attention(nn.Module):
-#     def __init__(self, nx, n_ctx, config, scale=False, is_cross_attention=False):
-#         super().__init__()
-#         # nx: model (hidden) size, e.g. 768
-#         self.n_head = config.n_head
-#         self.is_cross_attention = is_cross_attention
-#         self.scale = scale
-
-#         # If latent_dim given in config, treat it as KV-compression dim (d_c); else default to hidden size
-#         self.d_c = getattr(config, "latent_dim", nx)
-#         # Ensure model size divisible by heads
-#         assert nx % self.n_head == 0, f"Model dim ({nx}) must be divisible by n_head ({self.n_head})"
-#         self.d_head = nx // self.n_head  # dimension per head after decompression
-
-#         # Define down-projection (compression) layers
-#         # For Key/Value joint compression and for Query compression
-#         self.DKV_proj = nn.Linear(nx, self.d_c, bias=True)   # projects input to [*, d_c]
-#         self.DQ_proj  = nn.Linear(nx, self.d_c, bias=True)   # projects input to [*, d_c]
-
-#         # Define up-projection (decompression) layers to full model dimension
-#         self.UK_proj  = nn.Linear(self.d_c, nx, bias=True)   # decompress to key embedding
-#         self.UV_proj  = nn.Linear(self.d_c, nx, bias=True)   # decompress to value embedding
-#         self.UQ_proj  = nn.Linear(self.d_c, nx, bias=True)   # decompress to query embedding
-
-#         # Output projection back to model dimension (identity mapping style)
-#         self.c_proj = nn.Linear(nx, nx, bias=True)
-
-#         # Dropout layers
-#         self.attn_dropout = nn.Dropout(config.attn_pdrop)
-#         self.resid_dropout = nn.Dropout(config.resid_pdrop)
-
-#         # Causal mask buffer (same as GPT-2)
-#         self.register_buffer(
-#             "bias", torch.tril(torch.ones((n_ctx, n_ctx), dtype=torch.uint8))
-#             .view(1, 1, n_ctx, n_ctx)
-#         )
-#         self.register_buffer("masked_bias", torch.tensor(-1e4))
-
-#     def split_heads(self, x, k=False):
-#         # x shape: [batch, seq_len, nx]
-#         batch, seq_len, dim = x.size()
-#         # reshape to [batch, seq_len, n_head, head_dim]
-#         x = x.view(batch, seq_len, self.n_head, self.d_head)
-#         if k:
-#             # For key: [batch, n_head, head_dim, seq_len]
-#             return x.permute(0, 2, 3, 1)
-#         else:
-#             # For query/value: [batch, n_head, seq_len, head_dim]
-#             return x.permute(0, 2, 1, 3)
-
-#     def merge_heads(self, x):
-#         # x shape: [batch, n_head, seq_len, head_dim]
-#         batch, n_head, seq_len, head_dim = x.size()
-#         x = x.permute(0, 2, 1, 3).contiguous()  # [batch, seq_len, n_head, head_dim]
-#         return x.view(batch, seq_len, n_head * head_dim)  # [batch, seq_len, nx]
-#     def set_eval(self):
-#         pass
-#     def forward(self, hidden_states, layer_past=None, attention_mask=None,
-#                 head_mask=None, encoder_hidden_states=None,
-#                 encoder_attention_mask=None, use_cache=False,
-#                 output_attentions=False):
-#         # hidden_states: [batch, seq_len, nx]
-#         # For cross-attention, encoder_hidden_states provides keys/values
-#         kv_input = encoder_hidden_states if (self.is_cross_attention and encoder_hidden_states is not None) else hidden_states
-
-#         # 1) Compute compressed latent vectors
-#         #    C_KV: [batch, seq_len, d_c];  C_Q: [batch, seq_len, d_c]
-#         C_KV = self.DKV_proj(kv_input)        # compress keys+values
-#         C_Q  = self.DQ_proj(hidden_states)    # compress queries
-
-#         # 2) Decompress to full Q, K, V embeddings
-#         # Q_full, K_full, V_full: [batch, seq_len, nx]
-#         Q_full = self.UQ_proj(C_Q)
-#         K_full = self.UK_proj(C_KV)
-#         V_full = self.UV_proj(C_KV)
-
-#         # 3) Split into multi-heads
-#         query = self.split_heads(Q_full)             # [B, n_head, seq_len, head_dim]
-#         key   = self.split_heads(K_full, k=True)     # [B, n_head, head_dim, seq_len]
-#         value = self.split_heads(V_full)             # [B, n_head, seq_len, head_dim]
-
-#         # 4) (Optional) Handle past cache (for inference). 
-#         #    The original GPT-2 code concatenates past keys/values; MLA would cache C_KV instead.
-#         #    For compatibility, we maintain full-key caching as in standard attention.
-#         if layer_past is not None:
-#             past_key, past_value = layer_past
-#             # Note: past_key is expected shape [B, n_head, head_dim, prev_len]
-#             # Concatenate along sequence dimension
-#             key   = torch.cat((past_key, key), dim=-1)   # along seq_len (last dim)
-#             value = torch.cat((past_value, value), dim=-2)  # along seq_len (third dim)
-
-#         if use_cache:
-#             # For caching, return the full key and value. (Ideally MLA would return latent cache.)
-#             present = (key, value)
-#         else:
-#             present = (None,)
-
-#         # 5) Compute scaled dot-product attention
-#         # Compute raw scores: [batch, n_head, seq_len, seq_len]
-#         scores = torch.matmul(query, key)
-#         if self.scale:
-#             scores = scores / math.sqrt(self.d_head)
-
-#         # Causal mask (if not cross-attention)
-#         if not self.is_cross_attention:
-#             nd, ns = scores.size(-2), scores.size(-1)
-#             mask = self.bias[:, :, ns-nd:ns, :ns]
-#             scores = torch.where(mask.bool(), scores, self.masked_bias.to(scores.dtype))
-
-#         # Add provided attention mask (e.g., for padding or causal shifts)
-#         if attention_mask is not None:
-#             scores = scores + attention_mask
-
-#         attn_weights = nn.Softmax(dim=-1)(scores)
-#         attn_weights = self.attn_dropout(attn_weights)
-
-#         if head_mask is not None:
-#             attn_weights = attn_weights * head_mask
-
-#         # 6) Multiply by values -> [batch, n_head, seq_len, head_dim]
-#         attn_output = torch.matmul(attn_weights, value)
-
-#         # 7) Merge heads -> [batch, seq_len, nx]
-#         attn_output = self.merge_heads(attn_output)
-
-#         # 8) Output projection and dropout -> [batch, seq_len, nx]
-#         attn_output = self.c_proj(attn_output)
-#         attn_output = self.resid_dropout(attn_output)
-
-#         outputs = [attn_output, present] + ([attn_weights] if output_attentions else [])
-#         return outputs  # [output, present, (attentions)]
-
-# class Attention(nn.Module):
-#     def __init__(self, nx, n_ctx, config, scale=False, is_cross_attention=False):
-#         super().__init__()
-#         # nx: model (hidden) size, e.g. 768
-#         self.n_head = config.n_head
-#         self.is_cross_attention = is_cross_attention
-#         self.scale = scale
-
-#         # If latent_dim given in config, treat it as KV-compression dim (d_c); else default to hidden size
-#         self.d_c = getattr(config, "latent_dim", nx)
-#         # Ensure model size divisible by heads
-#         assert nx % self.n_head == 0, f"Model dim ({nx}) must be divisible by n_head ({self.n_head})"
-#         self.d_head = nx // self.n_head  # dimension per head after decompression
-        
-#         # Define down-projection (compression) layers
-#         self.WQ_UK=nn.Linear(nx,self.d_c,bias=True) #For query, different for each head
-#         self.DKV=nn.Linear(nx,self.d_c/self.n_head,bias=True) #For key and value, same for all heads
-
-#         self.WUV_O=nn.Linear(self.d_c,nx,bias=True) #For value and final output, different for each head
-        
-#         self.c_proj = nn.Linear(nx, nx, bias=True)
-
-#         # Dropout layers
-#         self.attn_dropout = nn.Dropout(config.attn_pdrop)
-#         self.resid_dropout = nn.Dropout(config.resid_pdrop)
-
-#         # Causal mask buffer (same as GPT-2)
-#         self.register_buffer(
-#             "bias", torch.tril(torch.ones((n_ctx, n_ctx), dtype=torch.uint8))
-#             .view(1, 1, n_ctx, n_ctx)
-#         )
-#         self.register_buffer("masked_bias", torch.tensor(-1e4))
-
-#     def split_heads(self, x, k=False):
-#         # x shape: [batch, seq_len, nx]
-#         batch, seq_len, dim = x.size()
-#         # reshape to [batch, seq_len, n_head, head_dim]
-#         x = x.view(batch, seq_len, self.n_head, self.d_head)
-#         if k:
-#             # For key: [batch, n_head, head_dim, seq_len]
-#             return x.permute(0, 2, 3, 1)
-#         else:
-#             # For query/value: [batch, n_head, seq_len, head_dim]
-#             return x.permute(0, 2, 1, 3)
-
-#     def merge_heads(self, x):
-#         # x shape: [batch, n_head, seq_len, head_dim]
-#         batch, n_head, seq_len, head_dim = x.size()
-#         x = x.permute(0, 2, 1, 3).contiguous()  # [batch, seq_len, n_head, head_dim]
-#         return x.view(batch, seq_len, n_head * head_dim)  # [batch, seq_len, nx]
-#     def set_eval(self):
-#         pass
-#     def forward(self, hidden_states, layer_past=None, attention_mask=None,
-#                 head_mask=None, encoder_hidden_states=None,
-#                 encoder_attention_mask=None, use_cache=False,
-#                 output_attentions=False):
-#         # hidden_states: [batch, seq_len, nx]
-#         # For cross-attention, encoder_hidden_states provides keys/values
-#         kv_input = encoder_hidden_states if (self.is_cross_attention and encoder_hidden_states is not None) else hidden_states
-
-#         # 1) Compute compressed latent vectors
-#         #    C_KV: [batch, seq_len, d_c];  C_Q: [batch, seq_len, d_c]
-#         C_KV = self.DKV_proj(kv_input)        # compress keys+values
-#         C_Q  = self.DQ_proj(hidden_states)    # compress queries
-
-#         # 2) Decompress to full Q, K, V embeddings
-#         # Q_full, K_full, V_full: [batch, seq_len, nx]
-#         Q_full = self.UQ_proj(C_Q)
-#         K_full = self.UK_proj(C_KV)
-#         V_full = self.UV_proj(C_KV)
-
-#         # 3) Split into multi-heads
-#         query = self.split_heads(Q_full)             # [B, n_head, seq_len, head_dim]
-#         key   = self.split_heads(K_full, k=True)     # [B, n_head, head_dim, seq_len]
-#         value = self.split_heads(V_full)             # [B, n_head, seq_len, head_dim]
-
-#         # 4) (Optional) Handle past cache (for inference). 
-#         #    The original GPT-2 code concatenates past keys/values; MLA would cache C_KV instead.
-#         #    For compatibility, we maintain full-key caching as in standard attention.
-#         if layer_past is not None:
-#             past_key, past_value = layer_past
-#             # Note: past_key is expected shape [B, n_head, head_dim, prev_len]
-#             # Concatenate along sequence dimension
-#             key   = torch.cat((past_key, key), dim=-1)   # along seq_len (last dim)
-#             value = torch.cat((past_value, value), dim=-2)  # along seq_len (third dim)
-
-#         if use_cache:
-#             # For caching, return the full key and value. (Ideally MLA would return latent cache.)
-#             present = (key, value)
-#         else:
-#             present = (None,)
-
-#         # 5) Compute scaled dot-product attention
-#         # Compute raw scores: [batch, n_head, seq_len, seq_len]
-#         scores = torch.matmul(query, key)
-#         if self.scale:
-#             scores = scores / math.sqrt(self.d_head)
-
-#         # Causal mask (if not cross-attention)
-#         if not self.is_cross_attention:
-#             nd, ns = scores.size(-2), scores.size(-1)
-#             mask = self.bias[:, :, ns-nd:ns, :ns]
-#             scores = torch.where(mask.bool(), scores, self.masked_bias.to(scores.dtype))
-
-#         # Add provided attention mask (e.g., for padding or causal shifts)
-#         if attention_mask is not None:
-#             scores = scores + attention_mask
-
-#         attn_weights = nn.Softmax(dim=-1)(scores)
-#         attn_weights = self.attn_dropout(attn_weights)
-
-#         if head_mask is not None:
-#             attn_weights = attn_weights * head_mask
-
-#         # 6) Multiply by values -> [batch, n_head, seq_len, head_dim]
-#         attn_output = torch.matmul(attn_weights, value)
-
-#         # 7) Merge heads -> [batch, seq_len, nx]
-#         attn_output = self.merge_heads(attn_output)
-
-#         # 8) Output projection and dropout -> [batch, seq_len, nx]
-#         attn_output = self.c_proj(attn_output)
-#         attn_output = self.resid_dropout(attn_output)
-
-#         outputs = [attn_output, present] + ([attn_weights] if output_attentions else [])
-#         return outputs  # [output, present, (attentions)]
-
 class Attention(nn.Module):
     def __init__(self, nx, n_ctx, config, scale=False, is_cross_attention=False):
         super().__init__()
@@ -875,6 +222,7 @@ class Attention(nn.Module):
         # 7) Softmax + dropout
         attn_weights = nn.functional.softmax(attn_scores, dim=-1)
         attn_weights = self.attn_dropout(attn_weights)
+        
         if head_mask is not None:
             attn_weights = attn_weights * head_mask
         
@@ -891,6 +239,62 @@ class Attention(nn.Module):
             outputs.append(attn_weights)
         return outputs
 
+class MoE(nn.Module):
+    def __init__(self, input_dim, hidden_dim, config):
+        """
+        Mixture of Experts (MoE) Layer.
+        Args:
+            num_experts: Number of expert networks.
+            input_dim: Input dimension.
+            hidden_dim: Hidden dimension of each expert.
+            top_k: Number of experts to activate per input.
+        """
+        super().__init__()
+        self.num_experts = config.num_experts
+        self.top_k = config.top_k
+
+        # Define experts as independent MLPs
+        self.experts = nn.ModuleList([MLP(hidden_dim, config=config) for _ in range(self.num_experts)])
+
+        # Gating network
+        self.gate = nn.Linear(input_dim, self.num_experts)
+
+    def forward(self, x):
+        """
+        Forward pass for MoE.
+        Args:
+            x: Input tensor of shape [batch_size, seq_len, input_dim].
+        Returns:
+            Output tensor after routing through selected experts.
+        """
+        # Compute gating scores
+        gate_scores = self.gate(x)  # [batch_size, seq_len, num_experts]
+        gate_probs = nn.functional.softmax(gate_scores, dim=-1)  # Softmax over experts
+
+        # Select top-k experts
+        top_k_values, top_k_indices = torch.topk(gate_probs, self.top_k, dim=-1)  # [batch_size, seq_len, top_k]
+
+        # Initialize output tensor
+        batch_size, seq_len, input_dim = x.size()
+        expert_outputs = torch.zeros(batch_size, seq_len, input_dim, device=x.device)  # [batch_size, seq_len, input_dim]
+
+        # Route inputs to top-k experts
+        for i, expert in enumerate(self.experts):
+            # Create a mask for inputs routed to this expert
+            mask = (top_k_indices == i).float()  # [batch_size, seq_len, top_k]
+            mask = mask.sum(dim=-1).unsqueeze(-1)  # Sum over top_k and add a singleton dimension: [batch_size, seq_len, 1]
+
+            # Apply the mask to the input
+            masked_x = x * mask  # [batch_size, seq_len, input_dim]
+
+            # Pass masked inputs through the expert
+            expert_output = expert(masked_x)  # [batch_size, seq_len, input_dim]
+
+            # Accumulate the expert outputs
+            expert_outputs += expert_output * mask  # Weighted sum of expert outputs
+
+        return expert_outputs
+    
 class MLP(nn.Module):
     def __init__(self, n_state, config):  # in MLP: n_state=3072 (4 * n_embd)
         super().__init__()
@@ -933,7 +337,8 @@ class Block(nn.Module):
         if config.add_cross_attention:
             self.crossattention = Attention(hidden_size, n_ctx, config, scale, is_cross_attention=True)
             self.ln_cross_attn = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
-        self.mlp = MLP(inner_dim, config)
+       # Replace MLP with MoE
+        self.moe = MoE(input_dim=hidden_size, hidden_dim=inner_dim, config=config)
         # self.adapter_mlp = AdapterMLP(512, config)  # ADAPTER
 
     def forward(
@@ -978,7 +383,8 @@ class Block(nn.Module):
             hidden_states = hidden_states + attn_output
             outputs = outputs + cross_attn_outputs[2:]  # add cross attentions if we output attention weights
 
-        feed_forward_hidden_states = self.mlp(self.ln_2(hidden_states))
+        # Pass through MoE layer
+        feed_forward_hidden_states = self.moe(self.ln_2(hidden_states))
         # residual connection
         hidden_states = hidden_states + feed_forward_hidden_states
         # hidden_states = hidden_states + self.adapter_ln(self.adapter_mlp(hidden_states))
