@@ -795,6 +795,9 @@ class Attention(nn.Module):
         self.attn_dropout = nn.Dropout(config.attn_pdrop)
         self.resid_dropout = nn.Dropout(config.resid_pdrop)
         
+        self.max_relative_position = config.max_relative_position  # you need to define this in your config
+        self.rel_pos_emb = nn.Embedding(2 * self.max_relative_position + 1, self.d_head)
+        
         # causal mask buffer
         self.register_buffer(
             "bias", torch.tril(torch.ones((n_ctx, n_ctx), dtype=torch.uint8))
@@ -861,6 +864,28 @@ class Attention(nn.Module):
         
         # 5) Scaled dot-product
         attn_scores = torch.matmul(Q, K.transpose(-1, -2))  # [B, n_head, T, T_kv]
+        
+        # Compute relative position matrix [T_q, T_kv]
+        seq_len_q, seq_len_kv = Q.size(2), K.size(2)
+        range_vec_q = torch.arange(seq_len_q, device=Q.device)
+        range_vec_kv = torch.arange(seq_len_kv, device=Q.device)
+        distance_mat = range_vec_kv[None, :] - range_vec_q[:, None]  # shape [T_q, T_kv]
+        distance_mat_clipped = torch.clamp(distance_mat, -self.max_relative_position, self.max_relative_position)
+        final_mat = distance_mat_clipped + self.max_relative_position  # shift to be >= 0
+        
+        # Lookup relative positional embeddings
+        relative_embeddings = self.rel_pos_emb(final_mat)  # shape [T_q, T_kv, d_head]
+        
+        # Expand Q to [B, n_head, T_q, 1, d_head] and relative_embeddings to [1, 1, T_q, T_kv, d_head]
+        Q_ = Q.unsqueeze(3)  # [B, n_head, T_q, 1, d_head]
+        rel_embeddings_ = relative_embeddings.unsqueeze(0).unsqueeze(0)  # [1,1,T_q,T_kv,d_head]
+        
+        # Compute Q * R
+        rel_attn_scores = torch.matmul(Q_, rel_embeddings_.transpose(-1, -2)).squeeze(3)  # [B, n_head, T_q, T_kv]
+        
+        # Add to original attention scores
+        attn_scores = attn_scores + rel_attn_scores
+        
         if self.scale:
             attn_scores = attn_scores / math.sqrt(self.d_head)
         

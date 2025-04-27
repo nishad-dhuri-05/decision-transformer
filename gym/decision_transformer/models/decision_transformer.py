@@ -32,6 +32,7 @@ class DecisionTransformer(TrajectoryModel):
             n_embd=hidden_size,
             **kwargs
         )
+        config.max_relative_position = 5
         config.n_ctx=config.n_positions
         config.latent_dim = 128
         config.use_cache=True
