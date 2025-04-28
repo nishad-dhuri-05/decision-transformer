@@ -199,7 +199,7 @@ def experiment(
                 returns.append(ret)
                 lengths.append(length)
                 if model_type == 'dt':
-                    cache_sizes.append(cache_size)
+                    cache_sizes.append(cache_size/length)
             return {
                 f'target_{target_rew}_return_mean': np.mean(returns),
                 f'target_{target_rew}_return_std': np.std(returns),
