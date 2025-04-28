@@ -165,11 +165,11 @@ def experiment(
 
     def eval_episodes(target_rew):
         def fn(model):
-            returns, lengths = [], []
+            returns, lengths, inference_time_per_step = [], [], []
             for _ in range(num_eval_episodes):
                 with torch.no_grad():
                     if model_type == 'dt':
-                        ret, length = evaluate_episode_rtg(
+                        ret, length, time = evaluate_episode_rtg(
                             env,
                             state_dim,
                             act_dim,
@@ -183,7 +183,7 @@ def experiment(
                             device=device,
                         )
                     else:
-                        ret, length = evaluate_episode(
+                        ret, length, time = evaluate_episode(
                             env,
                             state_dim,
                             act_dim,
@@ -197,11 +197,13 @@ def experiment(
                         )
                 returns.append(ret)
                 lengths.append(length)
+                inference_time_per_step.append(time / length)
             return {
                 f'target_{target_rew}_return_mean': np.mean(returns),
                 f'target_{target_rew}_return_std': np.std(returns),
                 f'target_{target_rew}_length_mean': np.mean(lengths),
                 f'target_{target_rew}_length_std': np.std(lengths),
+                f'target_{target_rew}_inference_time_mean': np.std(inference_time_per_step),
             }
         return fn
 
