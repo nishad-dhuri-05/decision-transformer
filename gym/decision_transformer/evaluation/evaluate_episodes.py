@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-import sys
+import time
 
 def evaluate_episode(
         env,
@@ -32,6 +32,7 @@ def evaluate_episode(
     sim_states = []
 
     episode_return, episode_length = 0, 0
+    eval_episode_start = time.time()
     for t in range(max_ep_len):
 
         # add padding
@@ -60,8 +61,8 @@ def evaluate_episode(
 
         if done:
             break
-
-    return episode_return, episode_length
+    episode_eval_time = time.time() - eval_episode_start
+    return episode_return, episode_length, episode_eval_time
 
 
 def evaluate_episode_rtg(
@@ -103,6 +104,7 @@ def evaluate_episode_rtg(
     sim_states = []
     past_key_values = None
     episode_return, episode_length = 0, 0
+    eval_episode_start = time.time()
     for t in range(max_ep_len):
 
         # add padding
@@ -195,4 +197,5 @@ def evaluate_episode_rtg(
     for layer_cache in past_key_values:
         if layer_cache is not None:
             cache_size+=layer_cache.element_size() * layer_cache.nelement()
-    return episode_return, episode_length,cache_size
+    episode_eval_time = time.time() - eval_episode_start
+    return episode_return, episode_length, cache_size, episode_eval_time
