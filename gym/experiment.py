@@ -169,7 +169,7 @@ def experiment(
 
     def eval_episodes(target_rew):
         def fn(model):
-            returns, lengths, inference_time_per_step = [], []
+            returns, lengths, inference_time_per_step = [], [], []
             for _ in range(num_eval_episodes):
                 with torch.no_grad():
                     if model_type == 'dt':

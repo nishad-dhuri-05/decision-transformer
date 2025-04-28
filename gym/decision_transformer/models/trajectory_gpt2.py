@@ -287,10 +287,16 @@ class MoE(nn.Module):
             if mask.any():  # Only process if there are tokens assigned to this expert
                 # Gather inputs for this expert
                 selected_x = x[mask]  # [num_selected_tokens, input_dim]
+                
+                # Gather gate probabilities for the selected tokens
+                selected_gate_probs = gate_probs[mask][:, i].unsqueeze(-1)  # [num_selected_tokens, 1]
 
                 # Forward pass through the expert
                 expert_output = expert(selected_x)  # [num_selected_tokens, input_dim]
-
+                
+                # Multiply expert output with gate probabilities
+                expert_output = expert_output * selected_gate_probs  # [num_selected_tokens, input_dim]
+                
                 # Scatter the expert output back to the original tensor
                 expert_outputs[mask] += expert_output
 
