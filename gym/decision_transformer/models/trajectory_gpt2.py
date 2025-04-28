@@ -259,46 +259,55 @@ class MoE(nn.Module):
         # Gating network
         self.gate = nn.Linear(input_dim, self.num_experts)
 
+        # Bias per expert (initialized to zero)
+        self.register_buffer('expert_biases', torch.zeros(self.num_experts))
+
+        # Bias update rate (for load balancing)
+        self.bias_update_rate = 0.01  # Example value
+
     def forward(self, x):
-        """
-        Forward pass for MoE.
-        Args:
-            x: Input tensor of shape [batch_size, seq_len, input_dim].
-        Returns:
-            Output tensor after routing through selected experts.
-        """
-        # Compute gating scores
-        gate_scores = self.gate(x)  # [batch_size, seq_len, num_experts]
-        gate_probs = nn.functional.softmax(gate_scores, dim=-1)  # Softmax over experts
-
-        # Select top-k experts
-        top_k_values, top_k_indices = torch.topk(gate_probs, self.top_k, dim=-1)  # [batch_size, seq_len, top_k]
-
-        # Initialize output tensor
         batch_size, seq_len, input_dim = x.size()
-        expert_outputs = torch.zeros(batch_size, seq_len, input_dim, device=x.device)  # [batch_size, seq_len, input_dim]
+        num_tokens = batch_size * seq_len
 
-        # Route inputs to top-k experts
+        # Step 1: Compute raw gate scores
+        gate_scores = self.gate(x)  # [batch_size, seq_len, num_experts]
+
+        # Step 2: Softmax to get s_{i,t}
+        gate_probs = nn.functional.softmax(gate_scores, dim=-1)  # [batch_size, seq_len, num_experts]
+
+        # Step 3: Add bias for TopK selection
+        biased_scores = gate_probs + self.expert_biases.view(1, 1, -1)  # bias broadcasting
+
+        # Step 4: Select top-k experts based on (s + b)
+        top_k_values, top_k_indices = torch.topk(biased_scores, self.top_k, dim=-1)
+
+        # Step 5: Create a one-hot mask for selected experts
+        expert_mask = torch.zeros_like(gate_probs)
+        expert_mask.scatter_(-1, top_k_indices, 1)
+
+        # Step 6: Gated scores: only keep original softmax s_{i,t} for selected experts
+        gated_scores = gate_probs * expert_mask  # [batch_size, seq_len, num_experts]
+
+        # Initialize outputs
+        expert_outputs = torch.zeros_like(x)
+
+        # Step 7: Route inputs to experts
         for i, expert in enumerate(self.experts):
-            # Find tokens assigned to this expert
-            mask = (top_k_indices == i)  # [batch_size, seq_len, top_k]
-            mask = mask.any(dim=-1)  # Reduce over top_k: [batch_size, seq_len]
+            mask = expert_mask[..., i].bool()  # [batch_size, seq_len]
+            if mask.any():
+                selected_x = x[mask]
+                selected_scores = gated_scores[mask][:,i].unsqueeze(-1)
 
-            if mask.any():  # Only process if there are tokens assigned to this expert
-                # Gather inputs for this expert
-                selected_x = x[mask]  # [num_selected_tokens, input_dim]
-                
-                # Gather gate probabilities for the selected tokens
-                selected_gate_probs = gate_probs[mask][:, i].unsqueeze(-1)  # [num_selected_tokens, 1]
+                expert_output = expert(selected_x)
+                expert_output = expert_output * selected_scores  # Weight expert output
 
-                # Forward pass through the expert
-                expert_output = expert(selected_x)  # [num_selected_tokens, input_dim]
-                
-                # Multiply expert output with gate probabilities
-                expert_output = expert_output * selected_gate_probs  # [num_selected_tokens, input_dim]
-                
-                # Scatter the expert output back to the original tensor
                 expert_outputs[mask] += expert_output
+
+        # Step 8: Update per-expert biases
+        assigned_counts = expert_mask.sum(dim=(0,1))  # tokens assigned to each expert
+        avg_tokens = assigned_counts.sum() / self.num_experts
+        load_error = avg_tokens - assigned_counts
+        self.expert_biases += self.bias_update_rate * load_error.sign()
 
         return expert_outputs
     
