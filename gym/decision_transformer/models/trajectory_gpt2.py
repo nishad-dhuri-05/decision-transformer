@@ -118,144 +118,144 @@ def load_tf_weights_in_gpt2(model, config, gpt2_checkpoint_path):
     return model
 
 # #Old one
-class Attention(nn.Module):
-    def __init__(self, nx, n_ctx, config, scale=False, is_cross_attention=False):
-        super().__init__()
+# class Attention(nn.Module):
+#     def __init__(self, nx, n_ctx, config, scale=False, is_cross_attention=False):
+#         super().__init__()
 
-        n_state = nx  # in Attention: n_state=768 (nx=n_embd)
-        # [switch nx => n_state from Block to Attention to keep identical to TF implem]
-        assert n_state % config.n_head == 0
-        self.register_buffer(
-            "bias", torch.tril(torch.ones((n_ctx, n_ctx), dtype=torch.uint8)).view(1, 1, n_ctx, n_ctx)
-        )
-        self.register_buffer("masked_bias", torch.tensor(-1e4))
-        self.n_head = config.n_head
-        self.split_size = n_state
-        self.scale = scale
-        self.is_cross_attention = is_cross_attention
-        if self.is_cross_attention:
-            self.c_attn = Conv1D(2 * n_state, nx)
-            self.q_attn = Conv1D(n_state, nx)
-        else:
-            self.c_attn = Conv1D(3 * n_state, nx)
-        self.c_proj = Conv1D(n_state, nx)
-        self.attn_dropout = nn.Dropout(config.attn_pdrop)
-        self.resid_dropout = nn.Dropout(config.resid_pdrop)
-        self.pruned_heads = set()
+#         n_state = nx  # in Attention: n_state=768 (nx=n_embd)
+#         # [switch nx => n_state from Block to Attention to keep identical to TF implem]
+#         assert n_state % config.n_head == 0
+#         self.register_buffer(
+#             "bias", torch.tril(torch.ones((n_ctx, n_ctx), dtype=torch.uint8)).view(1, 1, n_ctx, n_ctx)
+#         )
+#         self.register_buffer("masked_bias", torch.tensor(-1e4))
+#         self.n_head = config.n_head
+#         self.split_size = n_state
+#         self.scale = scale
+#         self.is_cross_attention = is_cross_attention
+#         if self.is_cross_attention:
+#             self.c_attn = Conv1D(2 * n_state, nx)
+#             self.q_attn = Conv1D(n_state, nx)
+#         else:
+#             self.c_attn = Conv1D(3 * n_state, nx)
+#         self.c_proj = Conv1D(n_state, nx)
+#         self.attn_dropout = nn.Dropout(config.attn_pdrop)
+#         self.resid_dropout = nn.Dropout(config.resid_pdrop)
+#         self.pruned_heads = set()
 
-    def set_eval(self):
-        pass
-    def prune_heads(self, heads):
-        if len(heads) == 0:
-            return
-        heads, index = find_pruneable_heads_and_indices(
-            heads, self.n_head, self.split_size // self.n_head, self.pruned_heads
-        )
-        index_attn = torch.cat([index, index + self.split_size, index + (2 * self.split_size)])
+#     def set_eval(self):
+#         pass
+#     def prune_heads(self, heads):
+#         if len(heads) == 0:
+#             return
+#         heads, index = find_pruneable_heads_and_indices(
+#             heads, self.n_head, self.split_size // self.n_head, self.pruned_heads
+#         )
+#         index_attn = torch.cat([index, index + self.split_size, index + (2 * self.split_size)])
 
-        # Prune conv1d layers
-        self.c_attn = prune_conv1d_layer(self.c_attn, index_attn, dim=1)
-        self.c_proj = prune_conv1d_layer(self.c_proj, index, dim=0)
+#         # Prune conv1d layers
+#         self.c_attn = prune_conv1d_layer(self.c_attn, index_attn, dim=1)
+#         self.c_proj = prune_conv1d_layer(self.c_proj, index, dim=0)
 
-        # Update hyper params
-        self.split_size = (self.split_size // self.n_head) * (self.n_head - len(heads))
-        self.n_head = self.n_head - len(heads)
-        self.pruned_heads = self.pruned_heads.union(heads)
+#         # Update hyper params
+#         self.split_size = (self.split_size // self.n_head) * (self.n_head - len(heads))
+#         self.n_head = self.n_head - len(heads)
+#         self.pruned_heads = self.pruned_heads.union(heads)
 
-    def _attn(self, q, k, v, attention_mask=None, head_mask=None, output_attentions=False):
-        w = torch.matmul(q, k)
-        if self.scale:
-            w = w / (float(v.size(-1)) ** 0.5)
-        nd, ns = w.size(-2), w.size(-1)
+#     def _attn(self, q, k, v, attention_mask=None, head_mask=None, output_attentions=False):
+#         w = torch.matmul(q, k)
+#         if self.scale:
+#             w = w / (float(v.size(-1)) ** 0.5)
+#         nd, ns = w.size(-2), w.size(-1)
 
-        if not self.is_cross_attention:
-            # if only "normal" attention layer implements causal mask
-            mask = self.bias[:, :, ns - nd: ns, :ns]
-            w = torch.where(mask.bool(), w, self.masked_bias.to(w.dtype))
+#         if not self.is_cross_attention:
+#             # if only "normal" attention layer implements causal mask
+#             mask = self.bias[:, :, ns - nd: ns, :ns]
+#             w = torch.where(mask.bool(), w, self.masked_bias.to(w.dtype))
 
-        if attention_mask is not None:
-            # Apply the attention mask
-            w = w + attention_mask
+#         if attention_mask is not None:
+#             # Apply the attention mask
+#             w = w + attention_mask
 
-        w = nn.Softmax(dim=-1)(w)
-        w = self.attn_dropout(w)
+#         w = nn.Softmax(dim=-1)(w)
+#         w = self.attn_dropout(w)
 
-        # Mask heads if we want to
-        if head_mask is not None:
-            w = w * head_mask
+#         # Mask heads if we want to
+#         if head_mask is not None:
+#             w = w * head_mask
 
-        outputs = [torch.matmul(w, v)]
-        if output_attentions:
-            outputs.append(w)
-        return outputs
+#         outputs = [torch.matmul(w, v)]
+#         if output_attentions:
+#             outputs.append(w)
+#         return outputs
 
-    def merge_heads(self, x):
-        x = x.permute(0, 2, 1, 3).contiguous()
-        new_x_shape = x.size()[:-2] + (x.size(-2) * x.size(-1),)
-        return x.view(*new_x_shape)  # in Tensorflow implem: fct merge_states
+#     def merge_heads(self, x):
+#         x = x.permute(0, 2, 1, 3).contiguous()
+#         new_x_shape = x.size()[:-2] + (x.size(-2) * x.size(-1),)
+#         return x.view(*new_x_shape)  # in Tensorflow implem: fct merge_states
 
-    def split_heads(self, x, k=False):
-        new_x_shape = x.size()[:-1] + (self.n_head, x.size(-1) // self.n_head)
-        x = x.view(*new_x_shape)  # in Tensorflow implem: fct split_states
-        if k:
-            return x.permute(0, 2, 3, 1)  # (batch, head, head_features, seq_length)
-        else:
-            return x.permute(0, 2, 1, 3)  # (batch, head, seq_length, head_features)
-    def use_cache(self):
-        pass
-    def forward(
-            self,
-            hidden_states,
-            layer_past=None,
-            attention_mask=None,
-            head_mask=None,
-            encoder_hidden_states=None,
-            encoder_attention_mask=None,
-            use_cache=False,
-            output_attentions=False,
-    ):
-        if encoder_hidden_states is not None:
-            assert hasattr(
-                self, "q_attn"
-            ), "If class is used as cross attention, the weights `q_attn` have to be defined. Please make sure to instantiate class with `Attention(..., is_cross_attention=True)`."
-            query = self.q_attn(hidden_states)
-            key, value = self.c_attn(encoder_hidden_states).split(self.split_size, dim=2)
-            attention_mask = encoder_attention_mask
-        else:
-            query, key, value = self.c_attn(hidden_states).split(self.split_size, dim=2)
+#     def split_heads(self, x, k=False):
+#         new_x_shape = x.size()[:-1] + (self.n_head, x.size(-1) // self.n_head)
+#         x = x.view(*new_x_shape)  # in Tensorflow implem: fct split_states
+#         if k:
+#             return x.permute(0, 2, 3, 1)  # (batch, head, head_features, seq_length)
+#         else:
+#             return x.permute(0, 2, 1, 3)  # (batch, head, seq_length, head_features)
+#     def use_cache(self):
+#         pass
+#     def forward(
+#             self,
+#             hidden_states,
+#             layer_past=None,
+#             attention_mask=None,
+#             head_mask=None,
+#             encoder_hidden_states=None,
+#             encoder_attention_mask=None,
+#             use_cache=False,
+#             output_attentions=False,
+#     ):
+#         if encoder_hidden_states is not None:
+#             assert hasattr(
+#                 self, "q_attn"
+#             ), "If class is used as cross attention, the weights `q_attn` have to be defined. Please make sure to instantiate class with `Attention(..., is_cross_attention=True)`."
+#             query = self.q_attn(hidden_states)
+#             key, value = self.c_attn(encoder_hidden_states).split(self.split_size, dim=2)
+#             attention_mask = encoder_attention_mask
+#         else:
+#             query, key, value = self.c_attn(hidden_states).split(self.split_size, dim=2)
 
-        query = self.split_heads(query)
-        key = self.split_heads(key, k=True)
-        value = self.split_heads(value)
-        present=None
-        if self.use_cache and layer_past is not None:
-            # past_key, past_value = layer_past[0].transpose(-2, -1), layer_past[1]  # transpose back cf below
-            present=layer_past
-            # key = torch.cat((past_key, key), dim=-1)
-            # value = torch.cat((past_value, value), dim=-2)
+#         query = self.split_heads(query)
+#         key = self.split_heads(key, k=True)
+#         value = self.split_heads(value)
+#         present=None
+#         if self.use_cache and layer_past is not None:
+#             # past_key, past_value = layer_past[0].transpose(-2, -1), layer_past[1]  # transpose back cf below
+#             present=layer_past
+#             # key = torch.cat((past_key, key), dim=-1)
+#             # value = torch.cat((past_value, value), dim=-2)
 
-        # if use_cache is True:
-        #     present = torch.stack((key.transpose(-2, -1), value))  # transpose to have same shapes for stacking
-        # else:
-        #     present = (None,)
-        if present is None:
-            present=torch.cat((key.transpose(-2,-1), value), dim=-1)  # (2, batch, n_head, head_dim, seq_length)
-        else:
-            temp=torch.cat((key.transpose(-2,-1), value), dim=-1)  # (2, batch, n_head, head_dim, seq_length)
-            # present=torch.cat((present,temp),dim=0)
-            present=temp#if entire sequence is in input
-        # else:
-        # present[0].append(key)  # (2, batch, n_head, head_dim, seq_length)
-        # present[1].append(value)
-        attn_outputs = self._attn(query, key, value, attention_mask, head_mask, output_attentions)
-        a = attn_outputs[0]
+#         # if use_cache is True:
+#         #     present = torch.stack((key.transpose(-2, -1), value))  # transpose to have same shapes for stacking
+#         # else:
+#         #     present = (None,)
+#         if present is None:
+#             present=torch.cat((key.transpose(-2,-1), value), dim=-1)  # (2, batch, n_head, head_dim, seq_length)
+#         else:
+#             temp=torch.cat((key.transpose(-2,-1), value), dim=-1)  # (2, batch, n_head, head_dim, seq_length)
+#             # present=torch.cat((present,temp),dim=0)
+#             present=temp#if entire sequence is in input
+#         # else:
+#         # present[0].append(key)  # (2, batch, n_head, head_dim, seq_length)
+#         # present[1].append(value)
+#         attn_outputs = self._attn(query, key, value, attention_mask, head_mask, output_attentions)
+#         a = attn_outputs[0]
 
-        a = self.merge_heads(a)
-        a = self.c_proj(a)
-        a = self.resid_dropout(a)
+#         a = self.merge_heads(a)
+#         a = self.c_proj(a)
+#         a = self.resid_dropout(a)
 
-        outputs = [a, present] + attn_outputs[1:]
-        return outputs,present  # a, present, (attentions)
+#         outputs = [a, present] + attn_outputs[1:]
+#         return outputs,present  # a, present, (attentions)
 
 
 # class Attention(nn.Module):
@@ -910,158 +910,158 @@ class Attention(nn.Module):
 #         return outputs,present
 
 
-# class Attention(nn.Module):
-#     def __init__(self, nx, n_ctx, config, scale=False, is_cross_attention=False):
-#         super().__init__()
-#         self.n_head = config.n_head
-#         self.is_cross_attention = is_cross_attention
-#         self.scale = scale
-#         self.is_eval=False
-#         # total latent dim for K/V, must be divisible by heads
-#         self.d_c = getattr(config, "latent_dim", nx)
-#         assert self.d_c % self.n_head == 0, f"d_c ({self.d_c}) must be divisible by n_head ({self.n_head})"
-#         # dimension per head
-#         self.d_head = self.d_c // self.n_head
+class Attention(nn.Module):
+    def __init__(self, nx, n_ctx, config, scale=False, is_cross_attention=False):
+        super().__init__()
+        self.n_head = config.n_head
+        self.is_cross_attention = is_cross_attention
+        self.scale = scale
+        self.is_eval=False
+        # total latent dim for K/V, must be divisible by heads
+        self.d_c = getattr(config, "latent_dim", nx)
+        assert self.d_c % self.n_head == 0, f"d_c ({self.d_c}) must be divisible by n_head ({self.n_head})"
+        # dimension per head
+        self.d_head = self.d_c // self.n_head
         
-#         # three matrices:
-#         # 1) shared query+key proj -> will slice out query heads and key/value latents
-#         self.WQ_UK = nn.Linear(nx, self.n_head * self.d_head, bias=True)
-#         # 2) shared K/V latent
-#         self.DKV   = nn.Linear(nx, self.d_head, bias=True)
-#         # 3) final output proj from concatenated heads back to nx
-#         self.WUV_O = nn.Linear(self.d_c, nx, bias=True)
+        # three matrices:
+        # 1) shared query+key proj -> will slice out query heads and key/value latents
+        self.WQ_UK = nn.Linear(nx, self.n_head * self.d_head, bias=True)
+        # 2) shared K/V latent
+        self.DKV   = nn.Linear(nx, self.d_head, bias=True)
+        # 3) final output proj from concatenated heads back to nx
+        self.WUV_O = nn.Linear(self.d_c, nx, bias=True)
         
-#         # dropout on attention weights and on final output
-#         self.attn_dropout = nn.Dropout(config.attn_pdrop)
-#         self.resid_dropout = nn.Dropout(config.resid_pdrop)
+        # dropout on attention weights and on final output
+        self.attn_dropout = nn.Dropout(config.attn_pdrop)
+        self.resid_dropout = nn.Dropout(config.resid_pdrop)
         
-#         # causal mask buffer
-#         self.register_buffer(
-#             "bias", torch.tril(torch.ones((n_ctx, n_ctx), dtype=torch.uint8))
-#             .view(1, 1, n_ctx, n_ctx)
-#         )
-#         self.register_buffer("masked_bias", torch.tensor(-1e4))
+        # causal mask buffer
+        self.register_buffer(
+            "bias", torch.tril(torch.ones((n_ctx, n_ctx), dtype=torch.uint8))
+            .view(1, 1, n_ctx, n_ctx)
+        )
+        self.register_buffer("masked_bias", torch.tensor(-1e4))
 
-#     def split_heads(self, x, is_key=False):
-#         # x has shape [B, T, n_head*d_head] or [B, T, d_head]
-#         B, T, D = x.size()
-#         if is_key:
-#             # for keys/values we expand later, so here x is D=d_head
-#             return x.view(B, T, 1, D).expand(B, T, self.n_head, D).permute(0, 2, 1, 3)
-#         else:
-#             # x of size n_head*d_head
-#             return x.view(B, T, self.n_head, self.d_head).permute(0, 2, 1, 3)
+    def split_heads(self, x, is_key=False):
+        # x has shape [B, T, n_head*d_head] or [B, T, d_head]
+        B, T, D = x.size()
+        if is_key:
+            # for keys/values we expand later, so here x is D=d_head
+            return x.view(B, T, 1, D).expand(B, T, self.n_head, D).permute(0, 2, 1, 3)
+        else:
+            # x of size n_head*d_head
+            return x.view(B, T, self.n_head, self.d_head).permute(0, 2, 1, 3)
 
-#     def set_eval(self):
-#         self.is_eval=True
-#         pass
-#     def merge_heads(self, x):
-#         # x: [B, n_head, T, d_head] -> [B, T, n_head*d_head]
-#         B, H, T, dh = x.size()
-#         return x.permute(0, 2, 1, 3).contiguous().view(B, T, H * dh)
+    def set_eval(self):
+        self.is_eval=True
+        pass
+    def merge_heads(self, x):
+        # x: [B, n_head, T, d_head] -> [B, T, n_head*d_head]
+        B, H, T, dh = x.size()
+        return x.permute(0, 2, 1, 3).contiguous().view(B, T, H * dh)
 
-#     def forward(
-#         self,
-#         hidden_states,
-#         layer_past=None,
-#         attention_mask=None,
-#         head_mask=None,
-#         encoder_hidden_states=None,
-#         encoder_attention_mask=None,
-#         use_cache=False,
-#         output_attentions=False,
-#     ):
-#         # 1) Queries: project & split
-#         Q = self.WQ_UK(hidden_states)            # [B, T, n_head*d_head]
-#         Q = self.split_heads(Q, is_key=False)    # [B, n_head, T, d_head]
+    def forward(
+        self,
+        hidden_states,
+        layer_past=None,
+        attention_mask=None,
+        head_mask=None,
+        encoder_hidden_states=None,
+        encoder_attention_mask=None,
+        use_cache=False,
+        output_attentions=False,
+    ):
+        # 1) Queries: project & split
+        Q = self.WQ_UK(hidden_states)            # [B, T, n_head*d_head]
+        Q = self.split_heads(Q, is_key=False)    # [B, n_head, T, d_head]
 
-#         # 2) Key/value latent
-#         kv_src = encoder_hidden_states if self.is_cross_attention and encoder_hidden_states is not None else hidden_states
-#         L_KV = self.DKV(kv_src)                  # [B, T_kv, d_head]
+        # 2) Key/value latent
+        kv_src = encoder_hidden_states if self.is_cross_attention and encoder_hidden_states is not None else hidden_states
+        L_KV = self.DKV(kv_src)                  # [B, T_kv, d_head]
         
-#         # 3) Handle caching of L_KV
-#         if use_cache:
-#             # layer_past: [B, T_past, d_head]
-#             if layer_past is not None:
-#                 # print("using cached past key/values")
-#                 L_KV = torch.cat([layer_past, L_KV], dim=1)
+        # 3) Handle caching of L_KV
+        if use_cache:
+            # layer_past: [B, T_past, d_head]
+            if layer_past is not None:
+                # print("using cached past key/values")
+                L_KV = torch.cat([layer_past, L_KV], dim=1)
 
-#         # present = L_KV if use_cache else None     # return this for next call
-#         present =L_KV
+        # present = L_KV if use_cache else None     # return this for next call
+        present =L_KV
 
-#         # 4) Split L_KV into keys & values (same latent for both)
-#         K = self.split_heads(L_KV, is_key=True)  # [B, n_head, T_kv_total, d_head]
-#         V = K.clone()                            # identical for values
+        # 4) Split L_KV into keys & values (same latent for both)
+        K = self.split_heads(L_KV, is_key=True)  # [B, n_head, T_kv_total, d_head]
+        V = K.clone()                            # identical for values
 
-#         # 5) Scaled dot-product
-#         attn_scores = torch.matmul(Q, K.transpose(-1, -2))  # [B, n_head, T, T_kv]
-#         if self.scale:
-#             attn_scores = attn_scores / math.sqrt(self.d_head)
-#         #iterate over attn_scores to apply causal mask manually
-#         # for b in range(attn_scores.size(0)):
-#         #     for n_h in range(attn_scores.size(1)):
-#         #         x,y= attn_scores[b][n_h].size()
-#         #         #make the upper triangular matrix -inf
-#         #         attn_scores[b][n_h][:,x:y] = attn_scores[b][n_h][:,x:y] -float('inf')
-#         # attn_scores = attn_scores.masked_fill(torch.triu(torch.ones_like(attn_scores), diagonal=1).bool(), -1e9)
-#         # 6) Adjust attention_mask for caching
-#         if attention_mask is not None:
-#             attn_scores = attn_scores + attention_mask
-#             # Get the sequence length of the keys and the current mask size
-#             seq_len_kv = K.size(2)
-#             mask_size = attention_mask.size(3)
+        # 5) Scaled dot-product
+        attn_scores = torch.matmul(Q, K.transpose(-1, -2))  # [B, n_head, T, T_kv]
+        if self.scale:
+            attn_scores = attn_scores / math.sqrt(self.d_head)
+        #iterate over attn_scores to apply causal mask manually
+        # for b in range(attn_scores.size(0)):
+        #     for n_h in range(attn_scores.size(1)):
+        #         x,y= attn_scores[b][n_h].size()
+        #         #make the upper triangular matrix -inf
+        #         attn_scores[b][n_h][:,x:y] = attn_scores[b][n_h][:,x:y] -float('inf')
+        # attn_scores = attn_scores.masked_fill(torch.triu(torch.ones_like(attn_scores), diagonal=1).bool(), -1e9)
+        # 6) Adjust attention_mask for caching
+        if attention_mask is not None:
+            attn_scores = attn_scores + attention_mask
+            # Get the sequence length of the keys and the current mask size
+            seq_len_kv = K.size(2)
+            mask_size = attention_mask.size(3)
 
-#             # If the mask is smaller than the key sequence length, we need to pad it
-#             if mask_size < seq_len_kv:
-#                 # Create padding tensor with same type and device as attention_mask
-#                 padding = torch.ones(
-#                     (attention_mask.size(0), attention_mask.size(1), attention_mask.size(2), seq_len_kv - mask_size),
-#                     dtype=attention_mask.dtype,
-#                     device=attention_mask.device
-#                 )# * -10000.0  # Large negative value for masked positions
+            # If the mask is smaller than the key sequence length, we need to pad it
+            if mask_size < seq_len_kv:
+                # Create padding tensor with same type and device as attention_mask
+                padding = torch.ones(
+                    (attention_mask.size(0), attention_mask.size(1), attention_mask.size(2), seq_len_kv - mask_size),
+                    dtype=attention_mask.dtype,
+                    device=attention_mask.device
+                )# * -10000.0  # Large negative value for masked positions
 
-#                 # Concatenate to extend the mask to the right size
-#                 attention_mask = torch.cat([attention_mask, padding], dim=3)
-#             else:
-#                 # If mask is larger, just slice it to match seq_len_kv
-#                 attention_mask = attention_mask[:, :, :, :seq_len_kv]
-#             # if not self.is_eval:
-#             attn_scores = attn_scores + attention_mask
-#                 # pass
+                # Concatenate to extend the mask to the right size
+                attention_mask = torch.cat([attention_mask, padding], dim=3)
+            else:
+                # If mask is larger, just slice it to match seq_len_kv
+                attention_mask = attention_mask[:, :, :, :seq_len_kv]
+            # if not self.is_eval:
+            attn_scores = attn_scores + attention_mask
+                # pass
 
-#         # 7) Causal / cross-attn mask
-#         if not self.is_cross_attention:
-#             seq_q, seq_kv = Q.size(2), K.size(2)
+        # 7) Causal / cross-attn mask
+        if not self.is_cross_attention:
+            seq_q, seq_kv = Q.size(2), K.size(2)
 
-#             # Check if the causal mask buffer is large enough
-#             if seq_kv <= self.bias.size(-1):
-#                 # Use pre-computed causal mask
-#                 causal = self.bias[:, :, seq_kv - seq_q : seq_kv, :seq_kv]
-#             else:
-#                 # Dynamically create a larger causal mask for longer sequences
-#                 device = attn_scores.device
-#                 causal = torch.tril(torch.ones((seq_q, seq_kv), device=device, dtype=torch.uint8))
-#                 causal = causal.view(1, 1, seq_q, seq_kv)
+            # Check if the causal mask buffer is large enough
+            if seq_kv <= self.bias.size(-1):
+                # Use pre-computed causal mask
+                causal = self.bias[:, :, seq_kv - seq_q : seq_kv, :seq_kv]
+            else:
+                # Dynamically create a larger causal mask for longer sequences
+                device = attn_scores.device
+                causal = torch.tril(torch.ones((seq_q, seq_kv), device=device, dtype=torch.uint8))
+                causal = causal.view(1, 1, seq_q, seq_kv)
 
-#             attn_scores = torch.where(causal.bool(), attn_scores, self.masked_bias.to(attn_scores.dtype))
-#         # 8) Softmax + dropout
-#         attn_weights = nn.functional.softmax(attn_scores, dim=-1)
-#         attn_weights = self.attn_dropout(attn_weights)
-#         if head_mask is not None:
-#             attn_weights = attn_weights * head_mask
+            attn_scores = torch.where(causal.bool(), attn_scores, self.masked_bias.to(attn_scores.dtype))
+        # 8) Softmax + dropout
+        attn_weights = nn.functional.softmax(attn_scores, dim=-1)
+        attn_weights = self.attn_dropout(attn_weights)
+        if head_mask is not None:
+            attn_weights = attn_weights * head_mask
 
-#         # 9) Weighted sum
-#         attn_out = torch.matmul(attn_weights, V)        # [B, n_head, T, d_head]
-#         attn_out = self.merge_heads(attn_out)           # [B, T, d_c]
+        # 9) Weighted sum
+        attn_out = torch.matmul(attn_weights, V)        # [B, n_head, T, d_head]
+        attn_out = self.merge_heads(attn_out)           # [B, T, d_c]
 
-#         # 10) Final projection back to hidden size
-#         attn_out = self.WUV_O(attn_out)                 # [B, T, nx]
-#         attn_out = self.resid_dropout(attn_out)
+        # 10) Final projection back to hidden size
+        attn_out = self.WUV_O(attn_out)                 # [B, T, nx]
+        attn_out = self.resid_dropout(attn_out)
 
-#         outputs = [attn_out, present]
-#         if output_attentions:
-#             outputs.append(attn_weights)
-#         return outputs, present
+        outputs = [attn_out, present]
+        if output_attentions:
+            outputs.append(attn_weights)
+        return outputs, present
 
 
 class MLP(nn.Module):

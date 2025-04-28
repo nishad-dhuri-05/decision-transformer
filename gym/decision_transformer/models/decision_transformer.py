@@ -33,7 +33,7 @@ class DecisionTransformer(TrajectoryModel):
             **kwargs
         )
         config.n_ctx=config.n_positions
-        config.latent_dim = 256
+        config.latent_dim = 64
         config.use_cache=False
         print("Using latent dim: ", config.latent_dim)
         self.use_cache=config.use_cache
