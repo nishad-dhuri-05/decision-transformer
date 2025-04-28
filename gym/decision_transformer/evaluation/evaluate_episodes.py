@@ -111,7 +111,7 @@ def evaluate_episode_rtg(
     for t in range(max_ep_len):
 
         # Capture the current frame from the environment
-        frame = env.render(mode='rgb_array')
+        frame = env.render()
         frames.append(frame)
 
         # add padding
@@ -153,7 +153,7 @@ def evaluate_episode_rtg(
     episode_eval_time = time.time() - eval_episode_start
     return episode_return, episode_length, episode_eval_time, frames
 
-def save_video(env, target_return, frames, fps=30):
+def save_video(env_name, target_return, frames, fps=30):
         """
         Save a list of frames as a video file.
         
@@ -162,7 +162,7 @@ def save_video(env, target_return, frames, fps=30):
             fps (int): Frames per second for the video.
         """
 
-        filename = f"videos/{env}-{target_return}.mp4"
+        filename = f"videos/{env_name}-{target_return}.mp4"
         print(f"Saving video to {filename}...")
         imageio.mimsave(filename, frames, fps=fps)
         print(f"Video saved successfully to {filename}!")

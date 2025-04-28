@@ -40,17 +40,17 @@ def experiment(
     exp_prefix = f'{group_name}-{random.randint(int(1e5), int(1e6) - 1)}'
 
     if env_name == 'hopper':
-        env = gym.make('Hopper-v4')
+        env = gym.make('Hopper-v4', render_mode="rgb_array")
         max_ep_len = 1000
         env_targets = [3600, 1800]  # evaluation conditioning targets
         scale = 1000.  # normalization for rewards/returns
     elif env_name == 'halfcheetah':
-        env = gym.make('HalfCheetah-v4')
+        env = gym.make('HalfCheetah-v4', render_mode="rgb_array")
         max_ep_len = 1000
         env_targets = [12000, 6000]
         scale = 1000.
     elif env_name == 'walker2d':
-        env = gym.make('Walker2d-v4')
+        env = gym.make('Walker2d-v4', render_mode="rgb_array")
         max_ep_len = 1000
         env_targets = [5000, 2500]
         scale = 1000.
@@ -203,10 +203,9 @@ def experiment(
                 returns.append(ret)
                 lengths.append(length)
                 inference_time_per_step.append(time / length)
-                if(i<10):
-                    frames.append(episode_frames)
+                frames.append(episode_frames)
 
-            save_video(env, target_rew/scale, frames.flatten(), fps=30)
+            save_video(env_name, target_rew, [frame for ep_frames in frames for frame in ep_frames], fps=30)
             return {
                 f'target_{target_rew}_return_mean': np.mean(returns),
                 f'target_{target_rew}_return_std': np.std(returns),
