@@ -31,7 +31,7 @@ class DecisionTransformer(TrajectoryModel):
             vocab_size=1,  # doesn't matter -- we don't use the vocab
             n_embd=hidden_size,
             num_experts=4,  # MoE-specific parameter
-            top_k=2,        # MoE-specific parameter
+            top_k=1,        # MoE-specific parameter
             **kwargs
         )
         config.n_ctx=config.n_positions

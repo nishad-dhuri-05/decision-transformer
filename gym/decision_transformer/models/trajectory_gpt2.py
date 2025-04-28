@@ -280,18 +280,19 @@ class MoE(nn.Module):
 
         # Route inputs to top-k experts
         for i, expert in enumerate(self.experts):
-            # Create a mask for inputs routed to this expert
-            mask = (top_k_indices == i).float()  # [batch_size, seq_len, top_k]
-            mask = mask.sum(dim=-1).unsqueeze(-1)  # Sum over top_k and add a singleton dimension: [batch_size, seq_len, 1]
+            # Find tokens assigned to this expert
+            mask = (top_k_indices == i)  # [batch_size, seq_len, top_k]
+            mask = mask.any(dim=-1)  # Reduce over top_k: [batch_size, seq_len]
 
-            # Apply the mask to the input
-            masked_x = x * mask  # [batch_size, seq_len, input_dim]
+            if mask.any():  # Only process if there are tokens assigned to this expert
+                # Gather inputs for this expert
+                selected_x = x[mask]  # [num_selected_tokens, input_dim]
 
-            # Pass masked inputs through the expert
-            expert_output = expert(masked_x)  # [batch_size, seq_len, input_dim]
+                # Forward pass through the expert
+                expert_output = expert(selected_x)  # [num_selected_tokens, input_dim]
 
-            # Accumulate the expert outputs
-            expert_outputs += expert_output * mask  # Weighted sum of expert outputs
+                # Scatter the expert output back to the original tensor
+                expert_outputs[mask] += expert_output
 
         return expert_outputs
     
