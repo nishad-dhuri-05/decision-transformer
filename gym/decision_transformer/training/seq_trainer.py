@@ -10,7 +10,7 @@ class SequenceTrainer(Trainer):
         states, actions, rewards, dones, rtg, timesteps, attention_mask = self.get_batch(self.batch_size)
         action_target = torch.clone(actions)
 
-        state_preds, action_preds, reward_preds = self.model.forward(
+        state_preds, action_preds, reward_preds,kv_cache = self.model.forward(
             states, actions, rewards, rtg[:,:-1], timesteps, attention_mask=attention_mask,
         )
 
@@ -31,4 +31,4 @@ class SequenceTrainer(Trainer):
         with torch.no_grad():
             self.diagnostics['training/action_error'] = torch.mean((action_preds-action_target)**2).detach().cpu().item()
 
-        return loss.detach().cpu().item()
+        return loss.detach().cpu().item(),kv_cache

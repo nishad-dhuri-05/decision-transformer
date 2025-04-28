@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-
+import sys
 
 def evaluate_episode(
         env,
@@ -76,6 +76,7 @@ def evaluate_episode_rtg(
         device='cuda',
         target_return=None,
         mode='normal',
+        max_context_len=20,
     ):
 
     model.eval()
@@ -100,21 +101,71 @@ def evaluate_episode_rtg(
     timesteps = torch.tensor(0, device=device, dtype=torch.long).reshape(1, 1)
 
     sim_states = []
-
+    past_key_values = None
     episode_return, episode_length = 0, 0
     for t in range(max_ep_len):
 
         # add padding
         actions = torch.cat([actions, torch.zeros((1, act_dim), device=device)], dim=0)
         rewards = torch.cat([rewards, torch.zeros(1, device=device)])
+        #if past_key_values have more than max_context_len, remove the first one
+        if past_key_values is not None:
+            for i in range(len(past_key_values)):
+                if past_key_values[i] is not None:
+                    #past_key_values[i] has shape (batch_size,sequence_length,hidden_size)
+                    #remove the first sequence_length-max_context_len elements from past_key_values[i], if present
+                    if past_key_values[i].shape[1] >= max_context_len-1:
+                        past_key_values[i] = past_key_values[i][:, -(max_context_len-2):,:]
 
-        action = model.get_action(
-            (states.to(dtype=torch.float32) - state_mean) / state_std,
-            actions.to(dtype=torch.float32),
-            rewards.to(dtype=torch.float32),
-            target_return.to(dtype=torch.float32),
-            timesteps.to(dtype=torch.long),
-        )
+        # Get the current inputs for this timestep
+        if model.use_cache:
+            # # With caching: only process the latest observation
+            current_state = ((states[-1:].to(dtype=torch.float32) - state_mean) / state_std).reshape(1, 1, state_dim)  # Latest state (padding)
+            current_action = actions[-1:].to(dtype=torch.float32).reshape(1,1,act_dim)  # Latest action (padding)
+            current_reward = rewards[-1:].to(dtype=torch.float32).reshape(1,1,1)  # Latest reward (padding)
+            current_return = target_return[:, -1:].to(dtype=torch.float32).reshape(1,1,1)  # Latest target return
+            current_timestep = timesteps[:, -1:].to(dtype=torch.long).reshape(1,1)  # Latest timestep
+            
+            action, past_key_values = model.get_action(
+                current_state,
+                current_action, 
+                current_reward,
+                current_return,
+                current_timestep,
+                past_key_values=past_key_values,
+            )
+            # current_state = ((state.to(dtype=torch.float32) - state_mean) / state_std).reshape(1, 1, state_dim)
+            # current_action = actions[-1:].reshape(1, 1, act_dim)
+            # current_reward = rewards[-1:].reshape(1, 1, 1)
+            # current_timestep = torch.as_tensor([t]).reshape(1, 1).to(device=device, dtype=torch.long)
+            # current_return = target_return.reshape(1, 1, 1)
+
+            # action, past_key_values = model.get_action(
+            #     current_state,
+            #     current_action, 
+            #     current_reward,
+            #     current_return,
+            #     current_timestep,
+            #     past_key_values=past_key_values,
+            # )
+        else:
+            # First step or no caching: process the entire sequence
+            action, past_key_values = model.get_action(
+                (states.to(dtype=torch.float32) - state_mean) / state_std,
+                actions.to(dtype=torch.float32),
+                rewards.to(dtype=torch.float32),
+                target_return.to(dtype=torch.float32),
+                timesteps.to(dtype=torch.long),
+                past_key_values=None,  # First call has no past key values
+            )
+        # action,past_key_values = model.get_action(
+        #         (states.to(dtype=torch.float32) - state_mean) / state_std,
+        #         actions.to(dtype=torch.float32),
+        #         rewards.to(dtype=torch.float32),
+        #         target_return.to(dtype=torch.float32),
+        #         timesteps.to(dtype=torch.long),
+        #         past_key_values=past_key_values,
+        #     )
         actions[-1] = action
         action = action.detach().cpu().numpy()
 
@@ -137,8 +188,11 @@ def evaluate_episode_rtg(
 
         episode_return += reward
         episode_length += 1
-
+        # cache_size=model.get_cache_size()
         if done:
             break
-
-    return episode_return, episode_length
+    cache_size = 0
+    for layer_cache in past_key_values:
+        if layer_cache is not None:
+            cache_size+=layer_cache.element_size() * layer_cache.nelement()
+    return episode_return, episode_length,cache_size

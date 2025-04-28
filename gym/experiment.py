@@ -165,11 +165,11 @@ def experiment(
 
     def eval_episodes(target_rew):
         def fn(model):
-            returns, lengths = [], []
+            returns, lengths,cache_sizes = [], [], []
             for _ in range(num_eval_episodes):
                 with torch.no_grad():
                     if model_type == 'dt':
-                        ret, length = evaluate_episode_rtg(
+                        ret, length,cache_size = evaluate_episode_rtg(
                             env,
                             state_dim,
                             act_dim,
@@ -181,6 +181,7 @@ def experiment(
                             state_mean=state_mean,
                             state_std=state_std,
                             device=device,
+                            max_context_len=K,
                         )
                     else:
                         ret, length = evaluate_episode(
@@ -197,11 +198,14 @@ def experiment(
                         )
                 returns.append(ret)
                 lengths.append(length)
+                if model_type == 'dt':
+                    cache_sizes.append(cache_size)
             return {
                 f'target_{target_rew}_return_mean': np.mean(returns),
                 f'target_{target_rew}_return_std': np.std(returns),
                 f'target_{target_rew}_length_mean': np.mean(lengths),
                 f'target_{target_rew}_length_std': np.std(lengths),
+                f'target_{target_rew}_cache_mean': np.mean(cache_sizes),
             }
         return fn
 

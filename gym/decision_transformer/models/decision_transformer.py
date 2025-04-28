@@ -33,9 +33,11 @@ class DecisionTransformer(TrajectoryModel):
             **kwargs
         )
         config.n_ctx=config.n_positions
-        config.latent_dim = 128
-        config.use_cache=True
-        print(config.add_cross_attention)
+        config.latent_dim = 256
+        config.use_cache=False
+        print("Using latent dim: ", config.latent_dim)
+        self.use_cache=config.use_cache
+        # print(config.add_cross_attention)
         # note: the only difference between this GPT2Model and the default Huggingface version
         # is that the positional embeddings are removed (since we'll add those ourselves)
         self.transformer = GPT2Model(config)
@@ -55,10 +57,17 @@ class DecisionTransformer(TrajectoryModel):
         self.predict_return = torch.nn.Linear(hidden_size, 1)
     def set_eval(self):
         self.transformer.set_eval()
-    def forward(self, states, actions, rewards, returns_to_go, timesteps, attention_mask=None):
+    def get_cache_size(self):
+        cache_size=self.transformer.get_cache_size()
+    def forward(self, states, actions, rewards, returns_to_go, timesteps, attention_mask=None,past_key_values=None):
 
         batch_size, seq_length = states.shape[0], states.shape[1]
-
+        # In DecisionTransformer.forward:
+        # Make sure all input sequences have the same sequence length
+        batch_size, seq_length = states.shape[0], states.shape[1]
+        assert actions.shape[0] == batch_size and actions.shape[1] == seq_length
+        assert returns_to_go.shape[0] == batch_size and returns_to_go.shape[1] == seq_length
+        assert timesteps.shape[0] == batch_size and timesteps.shape[1] == seq_length
         if attention_mask is None:
             # attention mask for GPT: 1 if can be attended to, 0 if not
             attention_mask = torch.ones((batch_size, seq_length), dtype=torch.long)
@@ -87,12 +96,13 @@ class DecisionTransformer(TrajectoryModel):
         ).permute(0, 2, 1).reshape(batch_size, 3*seq_length)
 
         # we feed in the input embeddings (not word indices as in NLP) to the model
-        transformer_outputs = self.transformer(
+        transformer_outputs,kv_cache = self.transformer(
             inputs_embeds=stacked_inputs,
             attention_mask=stacked_attention_mask,
+            # past_key_values=past_key_values,
         )
         x = transformer_outputs['last_hidden_state']
-
+        current_cache = transformer_outputs['past_key_values']
         # reshape x so that the second dimension corresponds to the original
         # returns (0), states (1), or actions (2); i.e. x[:,1,t] is the token for s_t
         x = x.reshape(batch_size, seq_length, 3, self.hidden_size).permute(0, 2, 1, 3)
@@ -102,14 +112,15 @@ class DecisionTransformer(TrajectoryModel):
         state_preds = self.predict_state(x[:,2])    # predict next state given state and action
         action_preds = self.predict_action(x[:,1])  # predict next action given state
 
-        return state_preds, action_preds, return_preds
+        return state_preds, action_preds, return_preds,kv_cache
 
-    def get_action(self, states, actions, rewards, returns_to_go, timesteps, **kwargs):
+    def get_action(self, states, actions, rewards, returns_to_go,timesteps,past_key_values=None, **kwargs):
         # we don't care about the past rewards in this model
 
         states = states.reshape(1, -1, self.state_dim)
         actions = actions.reshape(1, -1, self.act_dim)
         returns_to_go = returns_to_go.reshape(1, -1, 1)
+        rewards=rewards.reshape(1, -1, 1)
         timesteps = timesteps.reshape(1, -1)
 
         if self.max_length is not None:
@@ -138,7 +149,7 @@ class DecisionTransformer(TrajectoryModel):
         else:
             attention_mask = None
 
-        _, action_preds, return_preds = self.forward(
-            states, actions, None, returns_to_go, timesteps, attention_mask=attention_mask, **kwargs)
+        _, action_preds, return_preds,kv_cache = self.forward(
+            states, actions, rewards, returns_to_go, timesteps, attention_mask=attention_mask,past_key_values=past_key_values, **kwargs)
 
-        return action_preds[0,-1]
+        return action_preds[0,-1],kv_cache

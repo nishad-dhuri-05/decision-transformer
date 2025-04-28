@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-
+import sys
 import time
 
 
@@ -26,8 +26,12 @@ class Trainer:
         train_start = time.time()
 
         self.model.train()
+        max_cache_size= 0
         for _ in range(num_steps):
-            train_loss = self.train_step()
+            train_loss,kv_cache = self.train_step()
+            #get size of just kv cache structure
+            cache_size=sys.getsizeof(kv_cache) 
+            max_cache_size = max(max_cache_size,cache_size)
             train_losses.append(train_loss)
             if self.scheduler is not None:
                 self.scheduler.step()
@@ -46,7 +50,7 @@ class Trainer:
         logs['time/evaluation'] = time.time() - eval_start
         logs['training/train_loss_mean'] = np.mean(train_losses)
         logs['training/train_loss_std'] = np.std(train_losses)
-
+        logs['training/cache_max'] = max_cache_size/1e3 # in KB
         for k in self.diagnostics:
             logs[k] = self.diagnostics[k]
 
