@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import time
+import imageio
 
 def evaluate_episode(
         env,
@@ -104,8 +105,14 @@ def evaluate_episode_rtg(
     sim_states = []
 
     episode_return, episode_length = 0, 0
+    frames = []
+
     eval_episode_start = time.time()
     for t in range(max_ep_len):
+
+        # Capture the current frame from the environment
+        frame = env.render(mode='rgb_array')
+        frames.append(frame)
 
         # add padding
         actions = torch.cat([actions, torch.zeros((1, act_dim), device=device)], dim=0)
@@ -144,5 +151,19 @@ def evaluate_episode_rtg(
         if done:
             break
     episode_eval_time = time.time() - eval_episode_start
-    return episode_return, episode_length, episode_eval_time
+    return episode_return, episode_length, episode_eval_time, frames
+
+def save_video(env, target_return, frames, fps=30):
+        """
+        Save a list of frames as a video file.
+        
+        Args:
+            frames (list): List of frames (numpy arrays) collected during evaluation.
+            fps (int): Frames per second for the video.
+        """
+
+        filename = f"videos/{env}-{target_return}.mp4"
+        print(f"Saving video to {filename}...")
+        imageio.mimsave(filename, frames, fps=fps)
+        print(f"Video saved successfully to {filename}!")
 

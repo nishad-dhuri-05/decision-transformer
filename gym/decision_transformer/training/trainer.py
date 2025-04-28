@@ -4,6 +4,9 @@ import torch
 import time
 
 
+
+
+
 class Trainer:
 
     def __init__(self, model, optimizer, batch_size, get_batch, loss_fn, scheduler=None, eval_fns=None):
@@ -17,6 +20,8 @@ class Trainer:
         self.diagnostics = dict()
 
         self.start_time = time.time()
+    
+    
 
     def train_iteration(self, num_steps, iter_num=0, print_logs=False):
 

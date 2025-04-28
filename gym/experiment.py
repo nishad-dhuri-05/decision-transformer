@@ -8,7 +8,7 @@ import pickle
 import random
 import sys
 
-from decision_transformer.evaluation.evaluate_episodes import evaluate_episode, evaluate_episode_rtg
+from decision_transformer.evaluation.evaluate_episodes import evaluate_episode, evaluate_episode_rtg, save_video
 from decision_transformer.models.decision_transformer import DecisionTransformer
 from decision_transformer.models.mlp_bc import MLPBCModel
 from decision_transformer.training.act_trainer import ActTrainer
@@ -169,11 +169,12 @@ def experiment(
 
     def eval_episodes(target_rew):
         def fn(model):
-            returns, lengths, inference_time_per_step = [], [], []
-            for _ in range(num_eval_episodes):
+            returns, lengths, inference_time_per_step, frames = [], [], [], []
+            for i in range(num_eval_episodes):
                 with torch.no_grad():
+                    episode_frames = []
                     if model_type == 'dt':
-                        ret, length, time = evaluate_episode_rtg(
+                        ret, length, time, episode_frames = evaluate_episode_rtg(
                             env,
                             state_dim,
                             act_dim,
@@ -202,6 +203,10 @@ def experiment(
                 returns.append(ret)
                 lengths.append(length)
                 inference_time_per_step.append(time / length)
+                if(i<10):
+                    frames.append(episode_frames)
+
+            save_video(env, target_rew/scale, frames.flatten(), fps=30)
             return {
                 f'target_{target_rew}_return_mean': np.mean(returns),
                 f'target_{target_rew}_return_std': np.std(returns),
@@ -209,6 +214,7 @@ def experiment(
                 f'target_{target_rew}_length_std': np.std(lengths),
                 f'target_{target_rew}_inference_time_mean': np.mean(inference_time_per_step),
             }
+            
         return fn
 
     if model_type == 'dt':
